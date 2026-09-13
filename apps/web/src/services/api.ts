@@ -37,14 +37,23 @@ export interface ChatResult {
   }
 }
 
+interface ApiEnvelope<T> {
+  success: boolean
+  code: string
+  message: string
+  data: T
+  meta?: { requestId?: string; timestamp?: string; path?: string; durationMs?: number }
+  error?: { type?: string; details?: string }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, options)
-  const body = await response.json()
-  if (!response.ok)
-    throw new Error(
-      Array.isArray(body.message) ? body.message.join('；') : (body.message ?? '请求失败'),
-    )
-  return body
+  const body = (await response.json()) as ApiEnvelope<T>
+  if (!response.ok || body.success === false) {
+    const requestId = body.meta?.requestId ? `（requestId: ${body.meta.requestId}）` : ''
+    throw new Error(`${body.code ?? 'REQUEST_FAILED'}: ${body.error?.details ?? body.message ?? '请求失败'}${requestId}`)
+  }
+  return body.data
 }
 
 export const api = {

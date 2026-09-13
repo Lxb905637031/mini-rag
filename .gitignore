@@ -5,4 +5,5 @@ dist/
 *.db-journal
 chroma/
 data/uploads/
+apps/api/data/uploads/
 .DS_Store
