@@ -1,0 +1,21 @@
+{
+  "name": "mini-rag",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "node scripts/free-ports.mjs 3001 5173 && pnpm --filter @mini-rag/core build && pnpm --parallel --filter api --filter web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:generate": "pnpm --filter api prisma:generate",
+    "db:migrate": "pnpm --filter api prisma:migrate",
+    "docker:up": "docker compose up -d"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.6",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

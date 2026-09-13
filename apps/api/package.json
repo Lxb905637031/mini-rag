@@ -1,0 +1,33 @@
+{
+  "name": "@mini-rag/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "prisma generate && tsx watch src/main.ts",
+    "build": "prisma generate && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@mini-rag/core": "workspace:*",
+    "@nestjs/common": "^11.0.11",
+    "@nestjs/core": "^11.0.11",
+    "@nestjs/platform-express": "^11.0.11",
+    "@prisma/client": "^6.7.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "multer": "^1.4.5-lts.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.15.3",
+    "prisma": "^6.7.0",
+    "tsx": "^4.19.3",
+    "vitest": "^3.2.4"
+  }
+}

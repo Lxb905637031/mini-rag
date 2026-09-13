@@ -1,0 +1,25 @@
+{
+  "name": "@mini-rag/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@langchain/community": "^0.3.45",
+    "@langchain/core": "^0.3.65",
+    "@langchain/ollama": "^0.1.5",
+    "@langchain/textsplitters": "^0.1.0",
+    "chromadb": "^1.10.5",
+    "mime-types": "^2.1.35",
+    "mammoth": "^1.6.0",
+    "pdf-parse": "1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3"
+  }
+}

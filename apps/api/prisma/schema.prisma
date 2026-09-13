@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  ERROR
+}
+
+model KnowledgeBase {
+  id String @id @default(cuid())
+  name String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  documents Document[]
+}
+
+model Document {
+  id String @id @default(cuid())
+  knowledgeBaseId String
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  originalName String
+  mimeType String
+  path String
+  status DocumentStatus @default(PENDING)
+  errorMessage String?
+  chunkCount Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  chunks Chunk[]
+  @@index([knowledgeBaseId])
+  @@index([status])
+}
+
+model Chunk {
+  id String @id @default(cuid())
+  documentId String
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  content String
+  chunkIndex Int
+  page Int?
+  metadata Json?
+  createdAt DateTime @default(now())
+  @@index([documentId])
+}

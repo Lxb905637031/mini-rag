@@ -1,0 +1,19 @@
+# Dependencies & build output
+node_modules
+dist
+coverage
+
+# Lockfiles
+pnpm-lock.yaml
+
+# Runtime data & user uploads
+data
+apps/api/data
+
+# Prisma (SQL migrations & schema need dedicated plugins)
+prisma/migrations
+*.prisma
+
+# Environment files
+.env
+.env.*
