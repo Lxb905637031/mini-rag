@@ -47,6 +47,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express'
 import { memoryStorage } from 'multer'
 import { IngestionService } from './ingestion.service.js'
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js'
+import type { AuthUser } from '../common/authenticated-request.js'
 
 /**
  * 文档摄入控制器：文件上传入口 + 文档/切块的查询与删除。
@@ -84,37 +86,47 @@ export class IngestionController {
         callback(null, /\.(pdf|doc|docx|txt|md|markdown)$/i.test(file.originalname)),
     }),
   )
-  upload(@Param('knowledgeBaseId') id: string, @UploadedFile() file: Express.Multer.File) {
+  upload(
+    @Param('knowledgeBaseId') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthUser,
+  ) {
     // 没传文件，或后缀被 fileFilter 拒绝时，file 为 undefined，给前端明确的 400 提示。
     if (!file)
       throw new BadRequestException('Only PDF, DOC, DOCX, TXT and Markdown files are supported')
-    return this.service.upload(id, file)
+    return this.service.upload(id, file, user.id)
   }
 
   /**
    * 查询某个知识库下的全部文档（含各自的处理状态，供前端轮询展示）。
    * @param id 路径参数 knowledgeBaseId。
+   * @param user 当前登录用户，Service 会校验该知识库归属。
    * @returns 文档记录数组，按创建时间倒序。
    */
-  @Get() list(@Param('knowledgeBaseId') id: string) {
-    return this.service.list(id)
+  @Get() list(@Param('knowledgeBaseId') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.list(id, user.id)
   }
 
   /**
    * 查询某个文档切分后的全部文本块。
    * @param id 路径参数 documentId。
+   * @param user 当前登录用户，Service 会校验该文档归属。
    * @returns 切块数组，按 chunkIndex（块序号）升序，方便前端按阅读顺序展示。
    */
-  @Get(':documentId/chunks') chunks(@Param('documentId') id: string) {
-    return this.service.chunks(id)
+  @Get(':documentId/chunks') chunks(
+    @Param('documentId') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.chunks(id, user.id)
   }
 
   /**
    * 删除某个文档。
    * @param id 路径参数 documentId。
-   * @returns 形如 { id } 的删除结果；文档不存在时 Service 抛出 NotFoundException（404）。
+   * @param user 当前登录用户，只能删除自己知识库下的文档。
+   * @returns 形如 { id } 的删除结果；文档不存在或不属于当前用户时抛 NotFoundException（404）。
    */
-  @Delete(':documentId') remove(@Param('documentId') id: string) {
-    return this.service.remove(id)
+  @Delete(':documentId') remove(@Param('documentId') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user.id)
   }
 }

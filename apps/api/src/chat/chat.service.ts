@@ -43,22 +43,27 @@ export class ChatService {
    * @param input.mode           检索模式，缺省 hybrid（混合检索）
    * @param input.topK           最终取用片段数，缺省取配置文件的 topK
    * @param input.rerank         是否启用重排
+   * @param ownerId              当前登录用户 id：只能在自己的知识库中提问
    * @returns RagApplication 的结果：{ answer 答案文本, trace 检索过程明细 }
-   * @throws NotFoundException 知识库 id 不存在时返回 404
+   * @throws NotFoundException 知识库 id 不存在或不属于当前用户时返回 404
    */
-  async query(input: {
-    knowledgeBaseId: string
-    query: string
-    mode?: 'vector' | 'bm25' | 'hybrid'
-    topK?: number
-    rerank?: boolean
-  }) {
-    // 1) 查知识库，并连带查出其下所有文档、每个文档的所有切片（两层 include 嵌套）。
-    const base = await this.prisma.knowledgeBase.findUnique({
-      where: { id: input.knowledgeBaseId },
+  async query(
+    input: {
+      knowledgeBaseId: string
+      query: string
+      mode?: 'vector' | 'bm25' | 'hybrid'
+      topK?: number
+      rerank?: boolean
+    },
+    ownerId: string,
+  ) {
+    // 1) 查知识库（必须归属当前用户），并连带查出其下所有文档、每个文档的所有切片。
+    // findFirst 的复合 where 同时限定 id 与归属人，防止拿别人的知识库 id 提问。
+    const base = await this.prisma.knowledgeBase.findFirst({
+      where: { id: input.knowledgeBaseId, ownerId },
       include: { documents: { include: { chunks: true } } },
     })
-    // 找不到知识库直接抛 404，全局异常过滤器会把它转成统一错误响应。
+    // 找不到（id 非法或属于别人）统一抛 404，全局异常过滤器会转成统一错误响应。
     if (!base) throw new NotFoundException('Knowledge base not found')
 
     // 2) 创建嵌入模型客户端（负责把问题文本变成向量）。
@@ -72,6 +77,25 @@ export class ChatService {
       this.config.chromaUrl,
       input.knowledgeBaseId,
     )
+
+    // 文档 id → 数据库中当前正确的文件名。
+    // 背景：Chroma 向量元数据里的 fileName 是“文档摄入那一刻”写入的，历史文档可能仍是
+    // 旧的乱码名（SQLite 已修正但向量库里的副本不会自动更新），所以这里以数据库为唯一准绳。
+    const fileNameByDocumentId = new Map(
+      base.documents.map(document => [document.id, document.originalName]),
+    )
+
+    // 向量检索通道的薄包装：检索结果出来后，按 metadata.documentId 用数据库里的正确文件名
+    // 覆盖 Chroma 带回的 fileName（可能是乱码）。这样 RRF 融合、重排、大模型引用 [S1]、
+    // 前端“检索依据”卡片拿到的文件名全部是正常中文；查不到归属文档时原样返回，不误伤。
+    const vectorSearch = {
+      search: async (query: string, k: number) =>
+        (await store.search(query, k)).map(item => {
+          // Chroma 元数据里的 documentId 在摄入时由 Service 写入（见 ingestion.service.ts）。
+          const fileName = fileNameByDocumentId.get(String(item.metadata.documentId))
+          return fileName ? { ...item, metadata: { ...item.metadata, fileName } } : item
+        }),
+    }
 
     // 3) 把数据库里的切片拍平（flatMap）成 BM25 检索器需要的 { pageContent, metadata } 结构。
     const chunks = base.documents.flatMap(document =>
@@ -91,8 +115,13 @@ export class ChatService {
       }),
     )
 
-    // 4) 组装检索服务：向量通道 + BM25 通道 + 重排器。
-    const retrieval = new RetrievalService(store, new Bm25Retriever(chunks), new LexicalReranker())
+    // 4) 组装检索服务：向量通道（带文件名修正的包装）+ BM25 通道 + 重排器。
+    // RetrievalService 只要求向量通道实现 search 方法（结构化类型），vectorSearch 形状天然兼容。
+    const retrieval = new RetrievalService(
+      vectorSearch,
+      new Bm25Retriever(chunks),
+      new LexicalReranker(),
+    )
     // 组装 RAG 应用：检索服务 + 答案生成器（Ollama 本地大模型，temperature=0）。
     const app = new RagApplication(retrieval, createOllamaAnswerGenerator(this.config))
 

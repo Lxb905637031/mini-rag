@@ -741,3 +741,173 @@ td {
     margin-bottom: 24px;
   }
 }
+
+/* ============================================================
+   登录页与登录态相关样式（随认证功能新增）
+   ============================================================ */
+
+/* 登录页：占满全屏，居中放置登录卡片；背景沿用应用的浅色基调。 */
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f5f6f4;
+  padding: 24px;
+}
+
+/* 登录卡片：白色圆角卡片 + 轻微阴影。 */
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 38px 34px 30px;
+  box-shadow: 0 18px 50px rgba(35, 94, 75, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+
+/* 卡片顶部品牌区，尺寸比侧边栏里的略小。 */
+.login-brand {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.login-brand .brand-mark {
+  width: 34px;
+  height: 38px;
+  font-size: 22px;
+}
+.login-brand small {
+  display: block;
+  font-size: 7px;
+  letter-spacing: 1.6px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.login-card h1 {
+  margin: 26px 0 6px;
+  font-size: 24px;
+  letter-spacing: -0.8px;
+  font-weight: 600;
+}
+.login-subtitle {
+  margin: 0 0 22px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* 错误提示：淡红底 + 红色文字。 */
+.login-error {
+  background: #fdecec;
+  color: #c0392b;
+  border: 1px solid #f5c6c0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  margin-bottom: 16px;
+}
+
+/* 表单字段纵向排列。 */
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #4a554f;
+}
+.login-field input {
+  width: 100%;
+}
+
+/* 登录按钮：撑满卡片宽度。 */
+.login-button {
+  width: 100%;
+  margin-top: 4px;
+  padding: 12px 18px;
+  font-size: 14px;
+}
+
+.login-hint {
+  margin: 18px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* 路由守卫恢复登录态时的全屏提示。 */
+.auth-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* 侧边栏底部：用户信息块。 */
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fafbfa;
+}
+/* 用户名首字头像：绿色圆形。 */
+.user-avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--green);
+  color: #e5f1b1;
+  font-size: 14px;
+  font-weight: 700;
+}
+.user-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.user-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #3d4a43;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-meta small {
+  margin-top: 1px;
+}
+
+/* 退出按钮：次级描边样式，与主按钮区分。 */
+.logout-button {
+  margin-top: 10px;
+  width: 100%;
+  background: #fff;
+  color: var(--green);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  padding: 9px 14px;
+}
+.logout-button:hover {
+  background: #f1f5f1;
+}
+
+/* 原侧边栏底部的“本地优先”状态，与新增元素保持间距。 */
+.sidebar-status {
+  margin-top: 14px;
+  font-size: 12px;
+  color: #566b5a;
+}

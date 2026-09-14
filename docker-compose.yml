@@ -14,5 +14,27 @@ services:
       timeout: 5s
       retries: 5
 
+  # Redis：内存型键值数据库。本项目用它实现“退出登录后的 JWT 令牌黑名单”。
+  # redis:7-alpine 是官方轻量镜像；6379 是 Redis 默认端口，映射到本机同一端口。
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    # 启动命令：
+    #   appendonly yes         开启 AOF 持久化——每条写命令追加到磁盘日志，
+    #                          容器重启后黑名单等数据不丢失（Redis 默认只存内存）。
+    #   requirepass 留空       本地开发不设密码；生产环境务必通过环境变量设置密码。
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      # redis-cli ping 正常返回 PONG，据此判断容器是否就绪。
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   chroma_data:
+  # Redis 数据持久化卷：AOF 文件写在容器内 /data 目录，挂载到该卷。
+  redis_data:

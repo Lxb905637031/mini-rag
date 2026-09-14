@@ -23,6 +23,8 @@
  */
 import { Module } from '@nestjs/common'
 import { PrismaModule } from './prisma/prisma.module.js'
+import { RedisModule } from './redis/redis.module.js'
+import { AuthModule } from './auth/auth.module.js'
 import { KnowledgeController } from './knowledge/knowledge.controller.js'
 import { KnowledgeService } from './knowledge/knowledge.service.js'
 import { IngestionController } from './ingestion/ingestion.controller.js'
@@ -36,14 +38,16 @@ import { LabController } from './lab/lab.controller.js'
  * 根模块类：类体为空，所有装配信息都写在 @Module 装饰器的配置对象里。
  */
 @Module({
-  // imports：引入其它模块。PrismaModule 是全局模块，提供数据库访问服务 PrismaService。
-  imports: [PrismaModule],
+  // imports：引入其它模块。
+  // PrismaModule（SQLite）与 RedisModule（Redis）是全局基础模块；
+  // AuthModule 提供登录/登出/资料接口，并内置全局 JWT 守卫保护其它所有接口。
+  imports: [PrismaModule, RedisModule, AuthModule],
   // controllers：注册所有处理 HTTP 请求的控制器，Nest 据此建立路由表。
   controllers: [
     KnowledgeController, // 知识库管理相关接口
     IngestionController, // 文档摄入（上传、解析、入库）相关接口
     ChatController, // 对话问答（RAG 检索增强生成）相关接口
-    HealthController, // 健康检查接口 GET /health
+    HealthController, // 健康检查接口 GET /health（控制器上用 @Public 放行）
     LabController, // 实验/调试用接口
   ],
   // providers：声明可被依赖注入的服务类，供上面的控制器在构造函数中注入使用。

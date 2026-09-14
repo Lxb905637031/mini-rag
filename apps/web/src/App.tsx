@@ -1,9 +1,31 @@
-import { NavLink, Route, Routes } from 'react-router-dom'
+/**
+ * @file apps/web/src/App.tsx
+ * @description 应用根组件：组装登录状态提供者与全部路由。
+ *
+ * 路由结构：
+ *   /login                登录页（公开；已登录访问会自动跳回首页）
+ *   /  /chat  /lab        受保护页面，统一套 AppLayout（侧边栏 + 内容区），
+ *                         未登录时由 RequireAuth 重定向到 /login。
+ *
+ * 小白导读：
+ * - AuthProvider 必须包住路由：这样路由守卫和各页面才能共享登录状态。
+ * - 嵌套路由中没有 path 的父级路由用于“布局复用”：AppLayout 里的 <Outlet/>
+ *   会渲染当前匹配到的子页面。
+ */
+import { NavLink, Outlet, Route, Routes } from 'react-router-dom'
+import { AuthProvider, useAuth } from './auth/AuthContext'
+import { RequireAuth } from './auth/RequireAuth'
 import { KnowledgePage } from './pages/KnowledgePage'
 import { ChatPage } from './pages/ChatPage'
 import { LabPage } from './pages/LabPage'
+import { LoginPage } from './pages/LoginPage'
 
-export function App() {
+/**
+ * 登录后的整体布局：左侧固定侧边栏，右侧渲染子页面。
+ * 侧边栏底部显示当前登录用户与“退出登录”按钮。
+ */
+function AppLayout() {
+  const { user, logout } = useAuth()
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -19,16 +41,54 @@ export function App() {
           <NavLink to="/lab">⊞ 检索实验室</NavLink>
         </nav>
         <div className="sidebar-bottom">
-          <span className="status-dot" /> 本地优先<small>Ollama · Chroma · LangChain.js</small>
+          {/* 当前登录用户：优先显示昵称，没有则显示用户名 */}
+          <div className="sidebar-user">
+            <span className="user-avatar">
+              {(user?.displayName ?? user?.username ?? '?').slice(0, 1).toUpperCase()}
+            </span>
+            <div className="user-meta">
+              <span className="user-name">{user?.displayName ?? user?.username}</span>
+              <small>@{user?.username}</small>
+            </div>
+          </div>
+          {/* 退出登录：AuthContext.logout 会拉黑令牌并跳转登录页 */}
+          <button type="button" className="logout-button" onClick={() => void logout()}>
+            退出登录
+          </button>
+          <div className="sidebar-status">
+            <span className="status-dot" /> 本地优先<small>Ollama · Chroma · Redis</small>
+          </div>
         </div>
       </aside>
       <main className="main">
-        <Routes>
+        {/* 子路由（知识库/对话/实验室）在这里渲染 */}
+        <Outlet />
+      </main>
+    </div>
+  )
+}
+
+/** 路由表本身；AuthProvider 在更外层提供登录状态。 */
+export function App() {
+  return (
+    <AuthProvider>
+      <Routes>
+        {/* 公开路由：登录页 */}
+        <Route path="/login" element={<LoginPage />} />
+
+        {/* 受保护路由：整组套登录守卫与统一布局 */}
+        <Route
+          element={
+            <RequireAuth>
+              <AppLayout />
+            </RequireAuth>
+          }
+        >
           <Route path="/" element={<KnowledgePage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/lab" element={<LabPage />} />
-        </Routes>
-      </main>
-    </div>
+        </Route>
+      </Routes>
+    </AuthProvider>
   )
 }

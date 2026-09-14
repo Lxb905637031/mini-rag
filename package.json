@@ -11,6 +11,7 @@
     "format:check": "prettier --check .",
     "db:generate": "pnpm --filter api prisma:generate",
     "db:migrate": "pnpm --filter api prisma:migrate",
+    "db:seed": "pnpm --filter api prisma:seed",
     "docker:up": "docker compose up -d"
   },
   "devDependencies": {

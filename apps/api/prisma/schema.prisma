@@ -14,12 +14,38 @@ enum DocumentStatus {
   ERROR
 }
 
+/// 用户表：记录能登录本系统的账号。
+/// 目前只有“种子管理员”一个账号（由 prisma/seed.ts 创建），不开放公开注册。
+model User {
+  // 用户唯一 id，cuid() 自动生成一串不重复的随机字符串。
+  id String @id @default(cuid())
+  // 登录用户名，@unique 保证数据库层面不允许重名。
+  username String @unique
+  // 密码的 bcrypt 哈希值（不是明文密码！）。
+  // 注册/初始化时用 bcrypt.hash(明文密码) 计算后存入，登录时只比对哈希。
+  passwordHash String
+  // 昵称（展示用）。初始化时默认与用户名相同，用户以后可在个人资料中修改。
+  displayName String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  // 该用户拥有的全部知识库（一对多关系，反向字段对应 KnowledgeBase.owner）。
+  knowledgeBases KnowledgeBase[]
+}
+
 model KnowledgeBase {
   id String @id @default(cuid())
   name String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   documents Document[]
+  // 归属用户 id：数据隔离的核心字段，查询知识库时都要带上它过滤。
+  // 设为可空（String?）是“安全迁移”的需要：加字段时库里可能已有旧数据，
+  // 这些没有归属人的历史知识库由种子脚本回填给管理员。
+  // 应用层新建知识库时该字段必填，所以正常数据不会出现 null。
+  ownerId String?
+  // 归属关系：ownerId 引用 User.id；用户被删除时其知识库一并删除。
+  owner User? @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  @@index([ownerId])
 }
 
 model Document {

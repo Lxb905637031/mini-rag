@@ -32,25 +32,62 @@ export class IngestionService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   /**
-   * 处理文件上传：校验知识库 → 保存到磁盘 → 在数据库登记文档 → 触发后台索引。
-   * @param knowledgeBaseId 目标知识库 id
-   * @param file multer 解析出的上传文件（originalname 原始文件名、mimetype 类型、buffer 二进制内容）
-   * @returns 新创建的文档记录（初始状态通常为 PENDING）
-   * @throws NotFoundException 知识库不存在时抛 404
+   * 校验“知识库存在且属于当前用户”，是所有文档操作的统一入口检查。
+   * @param knowledgeBaseId 知识库 id
+   * @param ownerId 当前登录用户 id
+   * @throws NotFoundException 知识库不存在或不属于当前用户时抛 404
+   *         （与知识库模块保持一致：不暴露别人资源的存在性）
    */
-  async upload(knowledgeBaseId: string, file: Express.Multer.File) {
-    // 先确认知识库存在，避免把文件挂到一个不存在的知识库上。
-    const knowledgeBase = await this.prisma.knowledgeBase.findUnique({
-      where: { id: knowledgeBaseId },
+  private async assertBaseOwned(knowledgeBaseId: string, ownerId: string) {
+    const knowledgeBase = await this.prisma.knowledgeBase.findFirst({
+      where: { id: knowledgeBaseId, ownerId },
     })
     if (!knowledgeBase) throw new NotFoundException('Knowledge base not found')
+  }
+
+  /**
+   * 校验“文档存在且其所属知识库归当前用户所有”，用于只拿到 documentId 的接口。
+   * @param documentId 文档 id
+   * @param ownerId 当前登录用户 id
+   * @returns 文档记录（含 knowledgeBaseId，调用方可复用）
+   * @throws NotFoundException 文档不存在或不属于当前用户时抛 404
+   */
+  private async assertDocumentOwned(documentId: string, ownerId: string) {
+    const document = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      // 只需要文档所属知识库的 id 用于归属判断，不带切片等大字段。
+      select: { id: true, knowledgeBaseId: true },
+    })
+    // 文档不存在直接 404；存在还要进一步确认知识库归属。
+    if (!document) throw new NotFoundException('Document not found')
+    await this.assertBaseOwned(document.knowledgeBaseId, ownerId)
+    return document
+  }
+
+  /**
+   * 处理文件上传：校验知识库归属 → 保存到磁盘 → 在数据库登记文档 → 触发后台索引。
+   * @param knowledgeBaseId 目标知识库 id
+   * @param file multer 解析出的上传文件（originalname 原始文件名、mimetype 类型、buffer 二进制内容）
+   * @param ownerId 当前登录用户 id
+   * @returns 新创建的文档记录（初始状态通常为 PENDING）
+   * @throws NotFoundException 知识库不存在或不属于当前用户时抛 404
+   */
+  async upload(knowledgeBaseId: string, file: Express.Multer.File, ownerId: string) {
+    // 先确认知识库存在且属于当前用户，避免把文件挂到别人的知识库上。
+    await this.assertBaseOwned(knowledgeBaseId, ownerId)
+
+    // 修正中文文件名乱码：multer 1.x 底层的 busboy 默认按 latin1 解码 multipart 里的
+    // filename，而浏览器实际上传的是 UTF-8 原始字节，于是“高级前端专家.docx”会被解成
+    // “é«çº§å....docx”。这里先按 latin1 把每个字符还原成原始字节，再按 UTF-8
+    // 重新解码，即可得到真实文件名（纯英文/数字名每个字符都在 128 以内，转换后不变）。
+    const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8')
 
     // 上传目录可由环境变量指定，默认 ./data/uploads。
     const directory = process.env.UPLOAD_DIR ?? './data/uploads'
     // recursive: true —— 目录已存在不报错，父目录缺失则一并创建。
     await mkdir(directory, { recursive: true })
     // 文件名加时间戳前缀，防止同名文件互相覆盖；basename 去掉路径部分，防止路径穿越。
-    const path = join(directory, `${Date.now()}-${basename(file.originalname)}`)
+    const path = join(directory, `${Date.now()}-${basename(originalName)}`)
     // file.buffer 是内存中的文件二进制内容（multer memoryStorage），这里写入磁盘。
     await writeFile(path, file.buffer)
 
@@ -58,7 +95,7 @@ export class IngestionService {
     const document = await this.prisma.document.create({
       data: {
         knowledgeBaseId,
-        originalName: file.originalname,
+        originalName,
         mimeType: file.mimetype,
         path,
       },
@@ -71,16 +108,28 @@ export class IngestionService {
     return document
   }
 
-  /** 查询某知识库下的全部文档，按创建时间倒序（最新上传的在前）。 */
-  list(knowledgeBaseId: string) {
+  /**
+   * 查询某知识库下的全部文档，按创建时间倒序（最新上传的在前）。
+   * @param knowledgeBaseId 知识库 id
+   * @param ownerId 当前登录用户 id：先校验知识库归属，防止查询别人库里的文档
+   */
+  async list(knowledgeBaseId: string, ownerId: string) {
+    // 归属校验不通过会抛 404。
+    await this.assertBaseOwned(knowledgeBaseId, ownerId)
     return this.prisma.document.findMany({
       where: { knowledgeBaseId },
       orderBy: { createdAt: 'desc' },
     })
   }
 
-  /** 查询某文档切出的全部片段，按切片序号升序，供前端“查看切片”弹窗使用。 */
-  chunks(documentId: string) {
+  /**
+   * 查询某文档切出的全部片段，按切片序号升序，供前端“查看切片”弹窗使用。
+   * @param documentId 文档 id
+   * @param ownerId 当前登录用户 id：先校验文档归属
+   */
+  async chunks(documentId: string, ownerId: string) {
+    // 先确认该文档属于当前用户名下的知识库。
+    await this.assertDocumentOwned(documentId, ownerId)
     return this.prisma.chunk.findMany({
       where: { documentId },
       orderBy: { chunkIndex: 'asc' },
@@ -91,15 +140,19 @@ export class IngestionService {
    * 删除文档：先删向量库中的向量，再删磁盘文件，最后删数据库记录。
    * 顺序上先清理“外部副本”，避免数据库删了但向量残留成孤儿数据。
    * @param documentId 要删除的文档 id
+   * @param ownerId 当前登录用户 id：只能删除自己知识库下的文档
    * @returns 被删除的文档 id
-   * @throws NotFoundException 文档不存在时抛 404
+   * @throws NotFoundException 文档不存在或不属于当前用户时抛 404
    */
-  async remove(documentId: string) {
+  async remove(documentId: string, ownerId: string) {
+    // 先做归属校验（文档不存在或属于别人都抛 404）。
+    await this.assertDocumentOwned(documentId, ownerId)
     // 连带查出切片：向量库里的向量 id 就记录在切片的 metadata.chunkId 中。
     const document = await this.prisma.document.findUnique({
       where: { id: documentId },
       include: { chunks: true },
     })
+    // 理论上上面已校验过存在，这里再兜底一次，防止两步之间文档刚好被删。
     if (!document) throw new NotFoundException('Document not found')
 
     // 连接向量库，准备按 id 删除该文档的所有向量。

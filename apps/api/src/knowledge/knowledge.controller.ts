@@ -31,6 +31,8 @@
 import { Body, Controller, Delete, Get, Inject, Param, Post } from '@nestjs/common'
 import { IsNotEmpty, IsString } from 'class-validator'
 import { KnowledgeService } from './knowledge.service.js'
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js'
+import type { AuthUser } from '../common/authenticated-request.js'
 
 /**
  * 创建知识库的请求体 DTO。
@@ -50,37 +52,41 @@ export class KnowledgeController {
   constructor(@Inject(KnowledgeService) private readonly service: KnowledgeService) {}
 
   /**
-   * 查询全部知识库列表。
+   * 查询当前登录用户的知识库列表。
+   * @param user 当前登录用户（由全局 JWT 守卫写入、@CurrentUser() 取出）
    * @returns 知识库数组，每项附带 _count.documents（该库下的文档数量），按更新时间倒序。
    */
-  @Get() list() {
-    return this.service.list()
+  @Get() list(@CurrentUser() user: AuthUser) {
+    return this.service.list(user.id)
   }
 
   /**
-   * 新建知识库。
+   * 新建知识库（自动归属给当前登录用户）。
    * @param body 经过 DTO 校验的请求体，里面只有 name（名称）。
+   * @param user 当前登录用户。
    * @returns 新创建的知识库记录（含自动生成的 id、时间戳等）。
    */
-  @Post() create(@Body() body: CreateKnowledgeDto) {
-    return this.service.create(body.name)
+  @Post() create(@Body() body: CreateKnowledgeDto, @CurrentUser() user: AuthUser) {
+    return this.service.create(body.name, user.id)
   }
 
   /**
-   * 按 id 查询单个知识库详情（包含其下全部文档）。
+   * 按 id 查询单个知识库详情（只能查自己的，包含其下全部文档）。
    * @param id 路径参数：知识库 id。
-   * @returns 知识库详情；若 id 不存在，Service 会抛出 NotFoundException（404）。
+   * @param user 当前登录用户。
+   * @returns 知识库详情；若 id 不存在或不属于当前用户，Service 抛 NotFoundException（404）。
    */
-  @Get(':id') get(@Param('id') id: string) {
-    return this.service.get(id)
+  @Get(':id') get(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.get(id, user.id)
   }
 
   /**
-   * 按 id 删除知识库。
+   * 按 id 删除知识库（只能删自己的）。
    * @param id 路径参数：知识库 id。
-   * @returns 被删除的知识库记录；若 id 不存在则抛出 NotFoundException（404）。
+   * @param user 当前登录用户。
+   * @returns 被删除的知识库记录；若 id 不存在或不属于当前用户则抛 NotFoundException（404）。
    */
-  @Delete(':id') remove(@Param('id') id: string) {
-    return this.service.remove(id)
+  @Delete(':id') remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user.id)
   }
 }

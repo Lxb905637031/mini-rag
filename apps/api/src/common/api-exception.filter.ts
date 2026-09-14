@@ -65,9 +65,12 @@ export class ApiExceptionFilter implements ExceptionFilter {
     // 出错路径：优先用经过路由处理后的 originalUrl。
     const path = request.originalUrl ?? request.url
     // 若响应拦截器在请求对象上记录了开始时间，则顺带计算本次请求耗时。
+    // 请求对象的基础类型里没有 __apiStartedAt 字段（由拦截器动态挂上去），
+    // 所以先转 unknown 再转目标形状，这是 TS 给“动态附加字段”做类型收窄的标准写法。
+    const timedRequest = request as unknown as { __apiStartedAt?: number }
     const durationMs =
-      typeof (request as { __apiStartedAt?: number }).__apiStartedAt === 'number'
-        ? Date.now() - (request as { __apiStartedAt: number }).__apiStartedAt
+      typeof timedRequest.__apiStartedAt === 'number'
+        ? Date.now() - timedRequest.__apiStartedAt
         : undefined
     // 错误类型名（如 NotFoundError / TypeError），便于日志分类统计。
     const errorType = exception instanceof Error ? exception.name : 'UnknownError'

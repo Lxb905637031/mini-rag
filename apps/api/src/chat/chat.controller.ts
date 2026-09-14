@@ -15,6 +15,8 @@
 import { Body, Controller, Inject, Post } from '@nestjs/common'
 import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator'
 import { ChatService } from './chat.service.js'
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js'
+import type { AuthUser } from '../common/authenticated-request.js'
 
 /** POST /chat/query 的请求体结构与校验规则。 */
 class QueryDto {
@@ -53,8 +55,9 @@ export class ChatController {
 
   // POST /chat/query；@Body() 把请求体解析为 QueryDto（已通过全局管道校验与类型转换）。
   @Post('query')
-  query(@Body() body: QueryDto) {
-    // 控制器保持“薄”：直接转交服务层处理，返回 Promise（Nest 会自动 await 并序列化）。
-    return this.service.query(body)
+  query(@Body() body: QueryDto, @CurrentUser() user: AuthUser) {
+    // 控制器保持“薄”：把问题与当前用户 id 一起转交服务层，
+    // 服务层会据此限制只能检索当前用户自己的知识库。
+    return this.service.query(body, user.id)
   }
 }
