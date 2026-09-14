@@ -270,6 +270,43 @@ a {
   font-size: 11px;
   color: var(--muted);
 }
+/* 标题栏右侧操作区：把“文件数量”和“手动刷新”图标按钮排在同一行。 */
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* span 被包进 .panel-actions 后不再是 .panel-heading 的直接子元素，在这里补回同样的弱化文字样式。 */
+.panel-actions > span {
+  font-size: 11px;
+  color: var(--muted);
+}
+/* 手动刷新按钮：圆形浅绿底的图标按钮，替代定时轮询，只有点击时才请求一次服务端。 */
+.refresh-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  background: #f1f5f1;
+  color: var(--green);
+  font-size: 17px;
+  line-height: 1;
+}
+/* 鼠标悬停（且未禁用）时底色加深，提示可点击。 */
+.refresh-button:hover:not(:disabled) {
+  background: #e3ecdc;
+}
+/* 刷新进行中：图标匀速旋转一圈，给用户“正在加载”的反馈。 */
+.refresh-button.spinning {
+  animation: refresh-spin 0.9s linear infinite;
+}
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 table {
   width: 100%;
   border-collapse: collapse;

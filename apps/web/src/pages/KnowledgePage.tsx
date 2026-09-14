@@ -16,6 +16,8 @@ export function KnowledgePage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [name, setName] = useState('')
+  // 文档列表是否正在加载（首次进入或手动刷新时为 true）：控制刷新图标旋转并防止重复点击
+  const [refreshing, setRefreshing] = useState(false)
   const refreshBases = async () => {
     const items = await api.bases()
     setBases(items)
@@ -24,17 +26,25 @@ export function KnowledgePage() {
   useEffect(() => {
     void refreshBases().catch(error => setError(error.message))
   }, [])
+  // 拉取指定知识库的文档列表：文档表格只有这一个数据请求入口，初始化加载与手动刷新共用
+  const loadDocuments = (id: string) => {
+    setRefreshing(true) // 进入加载态：刷新按钮开始旋转并暂时禁用
+    void api
+      .documents(id)
+      .then(setDocuments) // 请求成功后用服务端返回的最新列表覆盖页面状态
+      .catch(error => setError(error.message))
+      .finally(() => setRefreshing(false)) // 无论成功还是失败都解除加载态
+  }
   useEffect(() => {
     if (!baseId) return
-    const refresh = () =>
-      void api
-        .documents(baseId)
-        .then(setDocuments)
-        .catch(error => setError(error.message))
-    refresh()
-    const timer = setInterval(refresh, 2500)
-    return () => clearInterval(timer)
+    // 切换知识库时只自动加载一次；不再定时轮询，之后的状态更新全部由用户手动点刷新触发，减轻服务端压力
+    loadDocuments(baseId)
   }, [baseId])
+  // 点击刷新图标时调用：未选中知识库或正在加载中则直接忽略，避免短时间内发出重复请求
+  const refreshDocuments = () => {
+    if (!baseId || refreshing) return
+    loadDocuments(baseId)
+  }
   const upload = async (files: FileList | null) => {
     if (!files || !baseId) return
     setBusy(true)
@@ -123,7 +133,21 @@ export function KnowledgePage() {
       <section className="panel">
         <div className="panel-heading">
           <h2>文档</h2>
-          <span>{documents.length} 个文件</span>
+          {/* 标题栏右侧：文件数量 + 手动刷新按钮 */}
+          <div className="panel-actions">
+            <span>{documents.length} 个文件</span>
+            {/* 手动刷新按钮：替代原来的每 2.5 秒定时轮询，只有用户点击时才向服务端请求一次 */}
+            <button
+              type="button"
+              className={`refresh-button${refreshing ? ' spinning' : ''}`}
+              onClick={refreshDocuments}
+              disabled={!baseId || refreshing}
+              title="刷新文档列表"
+              aria-label="刷新文档列表"
+            >
+              ↻
+            </button>
+          </div>
         </div>
         {documents.length === 0 ? (
           <div className="empty">先创建知识库，再上传第一份文档。</div>
