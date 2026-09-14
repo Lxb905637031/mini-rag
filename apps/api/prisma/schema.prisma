@@ -52,9 +52,17 @@ model Document {
   id String @id @default(cuid())
   knowledgeBaseId String
   knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  // 用户上传时的原始文件名（含中文与扩展名），展示与临时文件命名都用它。
   originalName String
+  // 文件的 MIME 类型（如 application/pdf、text/plain），上传时由 multer 提供。
   mimeType String
-  path String
+  // 文件的二进制内容，直接存进数据库（SQLite 中对应 BLOB 类型）。
+  // 新上传的文档真正内容在这里，不再写入本地磁盘；上传上限 10MB。
+  // 设为可空（Bytes?）是安全迁移的需要：旧记录先建为空列，再由回填脚本把磁盘文件读入。
+  content Bytes?
+  // 历史遗留的本地磁盘路径：2026-09 改造前上传的文件存在 ./data/uploads。
+  // 回填完成后置为 null；新上传的文档该字段一律为 null，保留字段仅为兼容旧数据。
+  path String?
   status DocumentStatus @default(PENDING)
   errorMessage String?
   chunkCount Int @default(0)

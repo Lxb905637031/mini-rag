@@ -1,14 +1,20 @@
 /**
  * @file apps/api/src/ingestion/ingestion.service.ts
- * @description 文档“摄入（ingestion）”服务：上传落盘 → 登记数据库 → 后台异步完成
+ * @description 文档“摄入（ingestion）”服务：上传文件二进制直接入库 → 后台异步完成
  *              解析、切块、向量化、写入 Chroma；同时提供文档/切片查询与删除。
+ *
+ * 文件存在哪里（2026-09 改造）：
+ *   现在上传的原始文件以 BLOB 形式保存在 SQLite 的 Document.content 字段里，
+ *   不再长期写入本地磁盘。只是 PDF/Word 解析器只认识“磁盘文件路径”，
+ *   所以后台处理时会先把数据库里的二进制写到操作系统临时目录（os.tmpdir()），
+ *   解析完成后在 finally 中立刻删除——临时文件只是解析瞬间的中转，不做持久保存。
  *
  * 文档状态机（document.status）：
  *   PENDING（已创建，等待处理）→ PROCESSING（索引中）→ COMPLETED（就绪）
  *                                                ↘ ERROR（失败，errorMessage 记录原因）
  *
  * 为什么上传接口要“异步处理”：解析 PDF/Word、调用 Ollama 生成向量都比较慢，
- * 不能让 HTTP 上传请求一直阻塞。这里先把文件落盘并登记（状态 PENDING）立即返回，
+ * 不能让 HTTP 上传请求一直阻塞。这里先把文件内容登记入库（状态 PENDING）立即返回，
  * 真正的索引在后台进行；前端通过定时轮询文档列表观察状态变化。
  */
 import { Inject, Injectable, NotFoundException } from '@nestjs/common'
@@ -20,10 +26,31 @@ import {
   loadConfig, // 读取环境变量配置
 } from '@mini-rag/core'
 import { PrismaService } from '../prisma/prisma.service.js'
-// Node 文件系统异步 API：建目录、删文件、写文件。
-import { mkdir, unlink, writeFile } from 'node:fs/promises'
+// Node 文件系统异步 API：写临时文件、删除临时文件。
+import { unlink, writeFile } from 'node:fs/promises'
+// os.tmpdir()：操作系统临时目录（macOS 通常是 /var/folders/...）。
+import { tmpdir } from 'node:os'
 // path 工具：拼路径、取文件名。
 import { basename, join } from 'node:path'
+
+/**
+ * 文档“摘要字段”白名单：查询/返回文档列表时刻意不包含 content。
+ * 原因：content 是最大可达 10MB 的二进制，列表接口若把它一并查出并序列化成 JSON，
+ * 既拖慢数据库查询，也会让前端收到巨大的无用响应（前端只展示文件名/状态等元数据）。
+ * 只有后台 process() 真正需要解析文件时，才单独把 content 查出来。
+ */
+const documentSummarySelect = {
+  id: true,
+  knowledgeBaseId: true,
+  originalName: true,
+  mimeType: true,
+  path: true,
+  status: true,
+  errorMessage: true,
+  chunkCount: true,
+  createdAt: true,
+  updatedAt: true,
+} as const
 
 @Injectable()
 export class IngestionService {
@@ -65,11 +92,11 @@ export class IngestionService {
   }
 
   /**
-   * 处理文件上传：校验知识库归属 → 保存到磁盘 → 在数据库登记文档 → 触发后台索引。
+   * 处理文件上传：校验知识库归属 → 把文件二进制与元数据直接写入数据库 → 触发后台索引。
    * @param knowledgeBaseId 目标知识库 id
    * @param file multer 解析出的上传文件（originalname 原始文件名、mimetype 类型、buffer 二进制内容）
    * @param ownerId 当前登录用户 id
-   * @returns 新创建的文档记录（初始状态通常为 PENDING）
+   * @returns 新创建的文档记录（初始状态通常为 PENDING；不含 content 二进制大字段）
    * @throws NotFoundException 知识库不存在或不属于当前用户时抛 404
    */
   async upload(knowledgeBaseId: string, file: Express.Multer.File, ownerId: string) {
@@ -82,23 +109,19 @@ export class IngestionService {
     // 重新解码，即可得到真实文件名（纯英文/数字名每个字符都在 128 以内，转换后不变）。
     const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8')
 
-    // 上传目录可由环境变量指定，默认 ./data/uploads。
-    const directory = process.env.UPLOAD_DIR ?? './data/uploads'
-    // recursive: true —— 目录已存在不报错，父目录缺失则一并创建。
-    await mkdir(directory, { recursive: true })
-    // 文件名加时间戳前缀，防止同名文件互相覆盖；basename 去掉路径部分，防止路径穿越。
-    const path = join(directory, `${Date.now()}-${basename(originalName)}`)
-    // file.buffer 是内存中的文件二进制内容（multer memoryStorage），这里写入磁盘。
-    await writeFile(path, file.buffer)
-
-    // 在数据库登记一条文档记录（关联知识库、保存原始文件名/类型/磁盘路径）。
+    // 文件不再落本地磁盘：multer memoryStorage 已把文件内容放在内存的 file.buffer 里，
+    // 这里直接把这份二进制（Buffer）写入 SQLite 的 content BLOB 字段；
+    // path 对新文档恒为 null（仅为兼容历史记录而保留的字段）。
+    // select 保证返回给前端的记录不含 content，避免把数 MB 二进制再序列化进 HTTP 响应。
     const document = await this.prisma.document.create({
       data: {
         knowledgeBaseId,
         originalName,
         mimeType: file.mimetype,
-        path,
+        path: null,
+        content: file.buffer,
       },
+      select: documentSummarySelect,
     })
 
     // “发射后不管”：后台执行索引，不 await，所以接口能立刻返回。
@@ -119,6 +142,8 @@ export class IngestionService {
     return this.prisma.document.findMany({
       where: { knowledgeBaseId },
       orderBy: { createdAt: 'desc' },
+      // 同样只取摘要字段，不把 content 二进制带进列表响应。
+      select: documentSummarySelect,
     })
   }
 
@@ -137,7 +162,7 @@ export class IngestionService {
   }
 
   /**
-   * 删除文档：先删向量库中的向量，再删磁盘文件，最后删数据库记录。
+   * 删除文档：先删向量库中的向量，再清理历史磁盘文件（若有），最后删数据库记录。
    * 顺序上先清理“外部副本”，避免数据库删了但向量残留成孤儿数据。
    * @param documentId 要删除的文档 id
    * @param ownerId 当前登录用户 id：只能删除自己知识库下的文档
@@ -150,7 +175,13 @@ export class IngestionService {
     // 连带查出切片：向量库里的向量 id 就记录在切片的 metadata.chunkId 中。
     const document = await this.prisma.document.findUnique({
       where: { id: documentId },
-      include: { chunks: true },
+      // 只取删除真正需要的字段，尤其不要把 content 二进制查进内存——
+      // 文档记录一删，库里的文件内容会随记录一起消失。
+      select: {
+        id: true,
+        path: true,
+        chunks: { select: { metadata: true } },
+      },
     })
     // 理论上上面已校验过存在，这里再兜底一次，防止两步之间文档刚好被删。
     if (!document) throw new NotFoundException('Document not found')
@@ -171,12 +202,16 @@ export class IngestionService {
       ),
     )
 
-    // 删除磁盘上的原始文件；若文件本就不存在（ENOENT）则忽略，其它 IO 错误照常抛出。
-    await unlink(document.path).catch(error => {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    })
+    // 只有改造前的历史记录还会在磁盘上留文件（path 非空），这里顺手删除；
+    // 文件本就不存在（ENOENT）则忽略，其它 IO 错误照常抛出。
+    // 新文档的原始文件存在数据库 content 字段里，下面 delete 时随记录一并删除，无需动磁盘。
+    if (document.path) {
+      await unlink(document.path).catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      })
+    }
 
-    // 最后删数据库记录（关联的 chunks 由 schema 中的级联规则一并删除）。
+    // 最后删数据库记录（content 二进制与关联的 chunks 由数据库级联规则一并删除）。
     await this.prisma.document.delete({ where: { id: documentId } })
     return { id: documentId }
   }
@@ -187,8 +222,19 @@ export class IngestionService {
    * @param documentId 待处理的文档 id
    */
   async process(documentId: string) {
-    // 重新查记录：上传与后台处理是两个时机，需拿到最新的文件路径等信息。
-    const document = await this.prisma.document.findUnique({ where: { id: documentId } })
+    // 重新查记录：上传与后台处理是两个时机，需拿到最新状态。
+    // 这里必须显式 select 出 content（文件二进制）——后台解析全靠它；
+    // 不直接用 findUnique 全量查询也是为了让“用到哪些字段”一目了然。
+    const document = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      select: {
+        id: true,
+        knowledgeBaseId: true,
+        originalName: true,
+        path: true,
+        content: true,
+      },
+    })
     // 记录可能在排队期间被删除，直接结束即可。
     if (!document) return
 
@@ -197,12 +243,38 @@ export class IngestionService {
       where: { id: documentId },
       data: { status: 'PROCESSING', errorMessage: null },
     })
+
+    // PDFLoader / DocxLoader / macOS textutil 都只能读取“磁盘上的文件路径”，
+    // 不能直接吃内存里的 Buffer。因此解析前先把数据库中的二进制写到系统临时目录，
+    // 文件名保留原始扩展名（解析器靠扩展名选择 PDF/Word/文本分支），
+    // 并在 finally 中无条件删除——临时文件只是解析瞬间的中转，应用目录里不再留存文件。
+    // filePath 最终指向要解析的文件；tempPath 非空表示文件是我们刚写出的临时文件。
+    let filePath = document.path
+    let tempPath: string | null = null
     try {
+      if (document.content) {
+        tempPath = join(tmpdir(), `mini-rag-${document.id}-${basename(document.originalName)}`)
+        filePath = tempPath
+        await writeFile(tempPath, document.content)
+      }
+      // 新旧两套存储都没有文件内容（极端的脏数据情况），直接报错进入 ERROR 状态，
+      // 提示用户重新上传，而不是把难懂的 ENOENT 抛到前端。
+      if (!filePath) {
+        throw new Error('文档原始内容缺失：数据库中没有保存文件，请重新上传该文档')
+      }
+
       // 步骤 1：嵌入模型客户端（切块时若策略需要也可能用到它）。
       const embeddings = createOllamaEmbeddings(this.config)
 
-      // 步骤 2：按文件类型解析磁盘文件，得到带元数据的文本片段/页。
-      const loaded = await loadDocument(document.path)
+      // 步骤 2：按文件类型解析文件，得到带元数据的文本片段/页。
+      const loaded = await loadDocument(filePath)
+      // loadDocument 会把“入参路径”写进每个片段的 metadata.source/fileName；
+      // 现在入参是系统临时路径（如 /var/folders/.../mini-rag-xxx-简历.pdf），没有展示意义，
+      // 统一改写成用户上传时的真实文件名，避免临时路径污染数据库切片与 Chroma 向量元数据。
+      for (const item of loaded) {
+        item.metadata.source = document.originalName
+        item.metadata.fileName = document.originalName
+      }
 
       // 步骤 3：切块。固定使用 recursive（递归按标点/换行切分，语义更完整）。
       const chunks = await chunkDocuments(loaded, 'recursive', {
@@ -269,6 +341,12 @@ export class IngestionService {
           errorMessage: error instanceof Error ? error.message : String(error),
         },
       })
+    } finally {
+      // 无论解析成功还是失败，都删除临时文件，保证磁盘上不残留上传内容。
+      // 删除失败（如文件已不存在）只吞掉不抛出：不能让清理错误掩盖真正的处理结果。
+      if (tempPath) {
+        await unlink(tempPath).catch(() => undefined)
+      }
     }
   }
 }

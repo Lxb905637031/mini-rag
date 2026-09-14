@@ -16,11 +16,12 @@
  *   GET    /knowledge-bases/:knowledgeBaseId/documents/:documentId/chunks
  *          查询某个文档切分出来的全部文本块（用于前端预览切块效果）
  *   DELETE /knowledge-bases/:knowledgeBaseId/documents/:documentId
- *          删除某个文档（同时清理 Chroma 向量、磁盘文件和数据库记录）
+ *          删除一个文档（同时清理 Chroma 向量和数据库记录；
+ *          仅改造前的历史文件会额外删除其磁盘副本）
  *
  * 数据流：
  *   HTTP（含上传的文件） -> IngestionController
- *                       -> IngestionService（保存文件、写库、触发后台索引流水线）
+ *                       -> IngestionService（文件二进制直接入库、触发后台索引流水线）
  *                       -> PrismaService 与 @mini-rag/core（解析/切块/embedding/Chroma）
  *
  * 小白概念（文件上传相关）：
@@ -28,7 +29,7 @@
  *   - @UseInterceptors(FileInterceptor('file', {...})) 表示：
  *       拦截请求，把表单中名为 file 的那一个文件解析出来，挂到 @UploadedFile() 参数上。
  *   - storage: memoryStorage() 表示文件先存在内存里（file.buffer），不落临时盘，
- *       之后由 Service 自己把 buffer 写到 UPLOAD_DIR 指定的目录。
+ *       之后由 Service 直接把 buffer 存进数据库 Document.content（BLOB），不写本地目录。
  *   - limits.fileSize 限制文件大小，这里是 10 MB（10 * 1024 * 1024 字节）。
  *   - fileFilter 按“原始文件名后缀”过滤，只放行 pdf/doc/docx/txt/md/markdown。
  *   - 如果没带文件或后缀不允许，file 会是空的，这里手动抛 BadRequestException（400）。
@@ -76,7 +77,7 @@ export class IngestionController {
   @Post()
   @UseInterceptors(
     FileInterceptor('file', {
-      // 文件先放内存，Service 再统一写入磁盘目录，便于自己控制文件名和路径。
+      // 文件先放内存，Service 直接把二进制 buffer 存入数据库，不写任何本地目录。
       storage: memoryStorage(),
       // 限制最大 10MB，防止超大文件撑爆内存或拖慢解析。
       limits: { fileSize: 10 * 1024 * 1024 },
