@@ -11,8 +11,12 @@
  *   不需要每个页面自己处理。
  */
 
-// 后端基础地址：Vite 读取 .env 里的 VITE_API_URL，缺省指向本地 3001 端口。
-const baseUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
+// 后端基础地址：默认走相对路径 /api，由 Vite 开发服务器代理转发到本机 3001 端口
+// （代理规则见 apps/web/vite.config.ts）。用相对路径而不是写死 http://localhost:3001，
+// 是为了让手机等局域网设备访问时也能正确指向电脑：写死 localhost 的话，手机上的
+// localhost 指的是手机自己，请求必然失败。生产环境如需指向独立域名，
+// 可通过设置 VITE_API_URL 环境变量覆盖。
+const baseUrl = import.meta.env.VITE_API_URL ?? '/api'
 
 // localStorage 中保存令牌的键名，抽成常量避免拼写不一致。
 const TOKEN_STORAGE_KEY = 'mini-rag_token'
