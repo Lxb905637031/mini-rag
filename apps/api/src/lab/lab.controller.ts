@@ -6,9 +6,10 @@
  * 路由：POST /lab/chunks
  * 数据流：前端粘贴文本 → DTO 校验 → 调用核心库 chunkDocuments → 返回切片与耗时。
  */
-import { Body, Controller, Post } from '@nestjs/common'
+import { Body, Controller, Get, Post } from '@nestjs/common'
 import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator'
 import { chunkDocuments, createOllamaEmbeddings, loadConfig } from '@mini-rag/core'
+import { Roles } from '../auth/decorators/roles.decorator.js'
 
 /** 切块预览请求体。 */
 class ChunkPreviewDto {
@@ -33,6 +34,18 @@ class ChunkPreviewDto {
 
 @Controller('lab')
 export class LabController {
+  /**
+   * RBAC 实验接口：验证 @Roles + RolesGuard 的完整链路。
+   * - admin 登录后访问 → 200，返回 message
+   * - 普通用户（注册产生）访问 → 403 Forbidden（角色不满足）
+   * - 未登录访问 → 401（先被 JwtAuthGuard 拦下，轮不到角色检查）
+   */
+  @Get('admin-only')
+  @Roles('admin')
+  adminOnly() {
+    return { message: '你是 admin，才能看到这条消息' }
+  }
+
   /**
    * 预览切块结果。
    * @returns chunks 切出的片段数组；durationMs 本次切块耗时（毫秒）

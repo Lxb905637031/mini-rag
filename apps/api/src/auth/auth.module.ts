@@ -15,6 +15,7 @@ import { JwtModule } from '@nestjs/jwt'
 import { AuthController } from './auth.controller.js'
 import { AuthService } from './auth.service.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
+import { RolesGuard } from './guards/roles.guard.js'
 
 @Module({
   imports: [
@@ -32,6 +33,10 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
     AuthService,
     // 以 APP_GUARD 令牌注册：告诉 Nest 把 JwtAuthGuard 作为全局守卫启用。
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // 第二个全局守卫：角色鉴权。注册顺序即执行顺序——
+    // 先 JwtAuthGuard（认证，生产 req.user），后 RolesGuard（鉴权，消费 req.user.role）。
+    // 顺序颠倒会导致 req.user 尚不存在，所有人（含 admin）都被 403。
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
 export class AuthModule {}

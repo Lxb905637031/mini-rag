@@ -19,6 +19,9 @@ export interface AuthUser {
   id: string
   // 登录用户名。
   username: string
+  // 角色（RBAC 鉴权用）：来自 JWT payload，登录时签发写入。
+  // 可选：阶段 1 的临时方案按用户名推导；旧令牌（升级前签发）里没有该字段。
+  role?: string
 }
 
 /**

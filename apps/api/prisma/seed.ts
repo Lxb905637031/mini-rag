@@ -44,11 +44,19 @@ async function main() {
     : await prisma.user.create({
         data: {
           username,
-          // 数据库只存哈希，永远不存明文密码；哈希无法反推出原密码。
+          // 数据库只存哈希，永远不存明文；哈希无法反推出原密码。
           passwordHash: await bcrypt.hash(password, 10),
           displayName: username,
+          // 管理员角色随创建写入（普通用户走网页注册，schema 默认 USER）。
+          role: 'ADMIN',
         },
       })
+
+  // 幂等订正：无论 admin 是何时创建的（包括本次迁移前就存在的历史数据），
+  // 种子脚本都把它的角色保证为 ADMIN——数据订正归 seed 管，不混进 migration。
+  if (admin.role !== 'ADMIN') {
+    await prisma.user.update({ where: { id: admin.id }, data: { role: 'ADMIN' } })
+  }
 
   // 批量回填：把所有 ownerId 还为空的知识库挂到管理员名下。
   // updateMany 只更新符合 where 条件的行；count 是实际被更新的行数。

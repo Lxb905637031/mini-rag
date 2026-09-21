@@ -35,6 +35,8 @@ interface JwtPayload {
   // subject 的缩写，约定放用户 id。
   sub: string
   username: string
+  // 角色（RBAC）：登录签发时写入，RolesGuard 据此鉴权。
+  role?: string
 }
 
 @Injectable()
@@ -87,7 +89,8 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     // 校验通过：把当前用户信息挂到请求对象上，后续控制器用 @CurrentUser() 读取。
-    const user: AuthUser = { id: payload.sub, username: payload.username }
+    // role 一并透传，供 RolesGuard 鉴权（没带 role 的旧令牌为 undefined，鉴权时会 403）。
+    const user: AuthUser = { id: payload.sub, username: payload.username, role: payload.role }
     request.user = user
     return true
   }

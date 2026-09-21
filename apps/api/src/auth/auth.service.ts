@@ -14,6 +14,8 @@ import { ConflictException, Inject, Injectable, UnauthorizedException } from '@n
 import { JwtService } from '@nestjs/jwt'
 import { createHash } from 'node:crypto'
 import bcrypt from 'bcryptjs'
+// Role：Prisma 生成的枚举（运行时真实存在的值），用来和数据库读出的 user.role 比较。
+import { Role } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { RedisService, REDIS_KEYS } from '../redis/redis.service.js'
 
@@ -60,9 +62,12 @@ export class AuthService {
       throw new UnauthorizedException('用户名或密码错误')
     }
     // 签发令牌：sub 约定为用户 id；有效期由 JwtModule 注册时的 expiresIn 决定。
+    // role：从数据库 User.role 读出（不再按用户名猜测）——DB 存 ADMIN/USER 大写枚举，
+    // 签进 JWT 的是小写字符串，这里做一次显式映射，RolesGuard 与 @Roles 用小写对照。
     const accessToken = await this.jwtService.signAsync({
       sub: user.id,
       username: user.username,
+      role: user.role === Role.ADMIN ? 'admin' : 'user',
     })
     return { accessToken, user: this.toSafeUser(user) }
   }
@@ -109,9 +114,11 @@ export class AuthService {
     })
     // 注册成功即签发令牌（复用与 login 完全相同的载荷结构与有效期配置），
     // 前端拿到响应就能直接进入登录态，无需再调一次登录接口。
+    // 注册用户的角色恒为 'user'：schema 的 @default(USER) 保证了新用户的默认角色。
     const accessToken = await this.jwtService.signAsync({
       sub: user.id,
       username: user.username,
+      role: 'user',
     })
     return { accessToken, user: this.toSafeUser(user) }
   }

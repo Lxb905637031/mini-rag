@@ -17,6 +17,14 @@ enum DocumentStatus {
   ERROR
 }
 
+/// 用户角色（RBAC 鉴权的数据源）：ADMIN=管理员（种子脚本创建并保证），
+/// USER=普通用户（网页注册产生）。用 enum 而非 String：数据库层直接拒绝
+/// 非法值——写入 'superadmin' 会报错，脏数据进不了库。
+enum Role {
+  ADMIN
+  USER
+}
+
 /// 用户表：记录能登录本系统的账号。
 /// 目前只有“种子管理员”一个账号（由 prisma/seed.ts 创建），不开放公开注册。
 model User {
@@ -29,6 +37,10 @@ model User {
   passwordHash String
   // 昵称（展示用）。初始化时默认与用户名相同，用户以后可在个人资料中修改。
   displayName String?
+  // 角色（RBAC 鉴权数据源）：登录时读出签进 JWT，RolesGuard 据此鉴权。
+  // @default(USER)：加列时 PG 会把现有行自动回填为 USER（历史用户默认普通权限，
+  // “安全迁移”——绝不给老数据挖坑）；admin 的 ADMIN 由种子脚本幂等保证。
+  role Role @default(USER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   // 该用户拥有的全部知识库（一对多关系，反向字段对应 KnowledgeBase.owner）。
