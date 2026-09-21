@@ -26,6 +26,8 @@ import {
   loadConfig, // 读取环境变量配置
 } from '@mini-rag/core'
 import { PrismaService } from '../prisma/prisma.service.js'
+// 队列生产者与任务工具：上传后把“索引任务”持久化进 Redis（BullMQ），由 Worker 消费执行。
+import { IngestionQueue, ingestionJobId } from './ingestion.queue.js'
 // Node 文件系统异步 API：写临时文件、删除临时文件。
 import { unlink, writeFile } from 'node:fs/promises'
 // os.tmpdir()：操作系统临时目录（macOS 通常是 /var/folders/...）。
@@ -56,7 +58,13 @@ const documentSummarySelect = {
 export class IngestionService {
   // 应用启动后读取一次 RAG 配置并复用。
   private readonly config = loadConfig()
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    // 显式 @Inject(PrismaService)：tsx watch（esbuild）会丢弃构造参数的类型元数据，
+    // 不写 @Inject 的话 Nest 无法知道该注入谁，运行时会得到 undefined（项目已踩过的坑）。
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    // 队列生产者：upload/remove 时用它把索引任务写进 Redis（或清理排队中的任务）。
+    @Inject(IngestionQueue) private readonly queue: IngestionQueue,
+  ) {}
 
   /**
    * 校验“知识库存在且属于当前用户”，是所有文档操作的统一入口检查。
@@ -124,10 +132,18 @@ export class IngestionService {
       select: documentSummarySelect,
     })
 
-    // “发射后不管”：后台执行索引，不 await，所以接口能立刻返回。
-    // void 表示刻意忽略返回的 Promise；.catch 兜底防止后台异常变成未处理的 Promise 拒绝
-    //（process 内部已会把失败写入 ERROR 状态，这里吞掉仅是双重保险）。
-    void this.process(document.id).catch(() => undefined)
+    // 索引任务交给 BullMQ 队列（任务持久化在 Redis）：API 重启不丢任务，
+    // 失败自动重试（3 次 + 指数退避），由 IngestionWorker 串行消费执行 process()。
+    // jobId 用 ingestionJobId(document.id) 生成（index-<文档id>）做幂等去重：
+    // 同一文档的重复入队会被 BullMQ 静默忽略，与“启动自愈重新入队”两个入口天然兼容。
+    // 注意：如果此刻 Redis 不可用，add 会抛错 → 接口返回 500，但文档记录已落库
+    // （状态 PENDING），下次应用重启时 Worker 的“启动自愈”会重新入队兜底——
+    // 全链路不存在“静默丢任务”的情况。
+    await this.queue.add(
+      'index',
+      { documentId: document.id },
+      { jobId: ingestionJobId(document.id) },
+    )
     return document
   }
 
@@ -172,6 +188,13 @@ export class IngestionService {
   async remove(documentId: string, ownerId: string) {
     // 先做归属校验（文档不存在或属于别人都抛 404）。
     await this.assertDocumentOwned(documentId, ownerId)
+    // 顺手清掉还在队列里排队的索引任务（如刚上传还没轮到处理就删除的场景）：
+    // 按 jobId 规则定位任务并删除；任务不存在、或正处于“处理中”无法删除时都静默忽略。
+    // 即使没删掉也不用担心——process() 对“数据库里已不存在的文档”会直接返回，安全幂等。
+    await this.queue
+      .getJob(ingestionJobId(documentId))
+      .then(job => job?.remove())
+      .catch(() => undefined)
     // 连带查出切片：向量库里的向量 id 就记录在切片的 metadata.chunkId 中。
     const document = await this.prisma.document.findUnique({
       where: { id: documentId },
@@ -217,8 +240,16 @@ export class IngestionService {
   }
 
   /**
-   * 文档索引流水线（后台执行）：解析 → 切块 → 向量化入库 → 落库切片 → 标记完成；
-   * 任何一步失败都把文档状态置为 ERROR 并记录原因，不让后台任务静默崩溃。
+   * 文档索引流水线：解析 → 切块 → 向量化入库 → 落库切片 → 标记完成。
+   *
+   * 改造后（BullMQ 版）本方法由 IngestionWorker 在消费队列任务时调用，
+   * 错误处理职责有明确分工：
+   *   - 成功：事务把状态置 COMPLETED（下面步骤 6，逻辑不变）；
+   *   - 失败：直接向上抛出（不再在这里写 ERROR！）——
+   *     Worker 的 'failed' 事件统一收尾：还有重试机会时置回 PENDING（BullMQ 自动重试），
+   *     重试耗尽后才置 ERROR。这样 BullMQ 才能感知失败并触发重试/退避。
+   *   - 每次执行开头都会置 PROCESSING 并清空 errorMessage（见下），重试时状态正确流转。
+   * 本方法保持幂等：重跑会先删旧切片再写新切片，重复执行不会产生脏数据。
    * @param documentId 待处理的文档 id
    */
   async process(documentId: string) {
@@ -332,15 +363,6 @@ export class IngestionService {
           data: { status: 'COMPLETED', chunkCount: prepared.length },
         }),
       ])
-    } catch (error) {
-      // 任意环节失败：记录 ERROR 状态与错误信息，前端轮询时即可展示失败原因。
-      await this.prisma.document.update({
-        where: { id: documentId },
-        data: {
-          status: 'ERROR',
-          errorMessage: error instanceof Error ? error.message : String(error),
-        },
-      })
     } finally {
       // 无论解析成功还是失败，都删除临时文件，保证磁盘上不残留上传内容。
       // 删除失败（如文件已不存在）只吞掉不抛出：不能让清理错误掩盖真正的处理结果。

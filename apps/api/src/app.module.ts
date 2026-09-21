@@ -29,6 +29,10 @@ import { KnowledgeController } from './knowledge/knowledge.controller.js'
 import { KnowledgeService } from './knowledge/knowledge.service.js'
 import { IngestionController } from './ingestion/ingestion.controller.js'
 import { IngestionService } from './ingestion/ingestion.service.js'
+// BullMQ 队列（生产者）与 Worker（消费者）：文档索引任务改由 Redis 队列驱动，
+// 任务持久化（重启不丢）、失败自动重试、启动自愈——见 ingestion/ 目录下两个新文件。
+import { IngestionQueue } from './ingestion/ingestion.queue.js'
+import { IngestionWorker } from './ingestion/ingestion.worker.js'
 import { ChatController } from './chat/chat.controller.js'
 import { ChatService } from './chat/chat.service.js'
 import { HealthController } from './health/health.controller.js'
@@ -51,6 +55,8 @@ import { LabController } from './lab/lab.controller.js'
     LabController, // 实验/调试用接口
   ],
   // providers：声明可被依赖注入的服务类，供上面的控制器在构造函数中注入使用。
-  providers: [KnowledgeService, IngestionService, ChatService],
+  // 注册顺序即实例化顺序：IngestionQueue（无依赖）先于 IngestionService/IngestionWorker，
+  // 后两者都通过 @Inject(IngestionQueue) 拿到同一个队列单例。
+  providers: [KnowledgeService, IngestionQueue, IngestionService, IngestionWorker, ChatService],
 })
 export class AppModule {}

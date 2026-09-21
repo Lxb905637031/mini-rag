@@ -80,6 +80,11 @@ async function bootstrap() {
   // 注册全局异常过滤器：任何环节抛出的异常最终都在这里被转成统一的错误 JSON。
   // 注册顺序上拦截器先包外层；一旦控制器抛错，异常会冒泡到过滤器处理。
   app.useGlobalFilters(new ApiExceptionFilter())
+  // 开启优雅停机：默认情况下 Nest 不监听 SIGINT/SIGTERM 信号（Ctrl+C 直接硬退），
+  // 开启后，进程收到退出信号会先按依赖图逆序调用各服务的 onModuleDestroy——
+  // 对本项目而言最关键的是 IngestionWorker 的 worker.close()：它会“停止领取新任务、
+  // 等当前索引任务跑完再退”，避免任务做到一半进程消失。必须放在 listen 之前调用。
+  app.enableShutdownHooks()
   // 启动 HTTP 监听：端口取环境变量 API_PORT，未配置时默认使用 3001；
   // Number(...) 是因为环境变量读出来永远是字符串，需要转成数字。
   await app.listen(Number(process.env.API_PORT ?? 3001))
