@@ -7,3 +7,9 @@ chroma/
 data/uploads/
 apps/api/data/uploads/
 .DS_Store
+.trae/
+# Chroma 向量数据（本地 bind mount 的数据目录，属于运行时数据不进仓库）
+data/chroma-local/
+# 本地 Redis / 服务日志残留
+dump.rdb
+*.log
