@@ -26,6 +26,8 @@ interface AuthContextValue {
   bootstrapping: boolean
   // 登录动作：成功后令牌已存好、user 已更新，页面再自行跳转。
   login: (username: string, password: string) => Promise<void>
+  // 注册动作：后端创建账号并直接返回令牌（注册即登录），成功后本地状态与登录后一致。
+  register: (username: string, password: string, displayName?: string) => Promise<void>
   // 退出动作：通知后端拉黑令牌，再清空本地状态。
   logout: () => Promise<void>
 }
@@ -78,6 +80,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(result.user)
   }, [])
 
+  /**
+   * 注册：后端“注册即登录”——创建账号的同时返回令牌与用户资料，
+   * 所以这里处理方式与 login 完全一致：存令牌、更新用户状态。
+   * 错误（如“用户名已被占用”409）直接抛给注册页展示。
+   */
+  const register = useCallback(async (username: string, password: string, displayName?: string) => {
+    const result = await api.register(username, password, displayName)
+    tokenStore.set(result.accessToken)
+    setUser(result.user)
+  }, [])
+
   /** 退出：即使后端调用失败（如网络问题）也要清掉本地登录态。 */
   const logout = useCallback(async () => {
     try {
@@ -91,8 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // useMemo 避免每次渲染都生成新对象导致所有消费组件无谓刷新。
   const value = useMemo(
-    () => ({ user, bootstrapping, login, logout }),
-    [user, bootstrapping, login, logout],
+    () => ({ user, bootstrapping, login, register, logout }),
+    [user, bootstrapping, login, register, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

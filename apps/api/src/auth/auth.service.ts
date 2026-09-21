@@ -10,7 +10,7 @@
  * - 退出登录 = 让这张未到期的令牌提前失效。JWT 本身无状态、收不回来，所以借助 Redis
  *   保存一份“黑名单”：守卫每次先查黑名单，命中就拒绝。
  */
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common'
+import { ConflictException, Inject, Injectable, UnauthorizedException } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { createHash } from 'node:crypto'
 import bcrypt from 'bcryptjs'
@@ -60,6 +60,55 @@ export class AuthService {
       throw new UnauthorizedException('用户名或密码错误')
     }
     // 签发令牌：sub 约定为用户 id；有效期由 JwtModule 注册时的 expiresIn 决定。
+    const accessToken = await this.jwtService.signAsync({
+      sub: user.id,
+      username: user.username,
+    })
+    return { accessToken, user: this.toSafeUser(user) }
+  }
+
+  /**
+   * 注册：校验用户名唯一 → bcrypt 加密入库 → 直接签发 JWT（注册即登录）。
+   * 与 login 的关键差别：login 对“用户不存在/密码错”统一返回 401 防探测，
+   * 注册则必须明确告诉用户“用户名已被占用”（409），否则用户无法改名重试。
+   * @param username 用户名（DTO 已校验格式：3~32 位字母/数字/下划线）
+   * @param password 明文密码（只在内存中参与哈希，绝不落库、不打日志）
+   * @param displayName 可选昵称；不传落库为 null，前端展示时回退用用户名
+   * @returns 访问令牌与用户资料（结构与 login 返回完全一致，前端可复用登录后的逻辑）
+   * @throws ConflictException 用户名已被占用时抛 409
+   */
+  async register(username: string, password: string, displayName?: string): Promise<LoginResult> {
+    // 先查重：username 在 Prisma schema 里有 @unique 约束（数据库层也会兜底拦截），
+    // 但提前查一次能把错误翻译成友好的 409 提示，而不是让唯一约束冲突抛 500。
+    const existing = await this.prisma.user.findUnique({ where: { username } })
+    if (existing) {
+      throw new ConflictException('用户名已被占用')
+    }
+    // bcrypt.hash：把明文密码加密成不可逆哈希后入库。
+    // cost=10 与 seed.ts 保持一致（同一项目里所有密码用同一强度，避免维护混乱）。
+    const passwordHash = await bcrypt.hash(password, 10)
+    // 昵称做了 trim（去首尾空格）；空字符串与不传同样视为“没填”，落库 null。
+    const trimmedDisplayName = displayName?.trim() || null
+    // 创建用户记录：数据库层 username @unique 若仍冲突（如并发注册同名），
+    // Prisma 会抛 P2002 错误 → 被全局异常过滤器转成 500；前端重试即可，概率极低。
+    const user = await this.prisma.user.create({
+      data: {
+        username,
+        passwordHash,
+        displayName: trimmedDisplayName,
+      },
+    })
+    // 注册即自动创建一个“默认知识库”：保证新用户登录后上传区直接可用。
+    // 背景：上传接口必须挂在某个知识库下，如果新用户名下没有知识库，
+    // 前端上传按钮会因“未选中知识库”被禁用，此前造成过新用户无法上传的 bug。
+    await this.prisma.knowledgeBase.create({
+      data: {
+        name: '默认知识库',
+        ownerId: user.id,
+      },
+    })
+    // 注册成功即签发令牌（复用与 login 完全相同的载荷结构与有效期配置），
+    // 前端拿到响应就能直接进入登录态，无需再调一次登录接口。
     const accessToken = await this.jwtService.signAsync({
       sub: user.id,
       username: user.username,

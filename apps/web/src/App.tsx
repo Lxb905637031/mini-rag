@@ -3,7 +3,8 @@
  * @description 应用根组件：组装登录状态提供者与全部路由。
  *
  * 路由结构：
- *   /login                登录页（公开；已登录访问会自动跳回首页）
+ *   /login                登录页（公开；登录/注册 Tab 二合一，已登录访问会自动跳回首页）
+ *   /register             重定向到 /login?tab=register（注册已合并进登录页的 Tab）
  *   /  /chat  /lab        受保护页面，统一套 AppLayout（侧边栏 + 内容区），
  *                         未登录时由 RequireAuth 重定向到 /login。
  *
@@ -12,7 +13,7 @@
  * - 嵌套路由中没有 path 的父级路由用于“布局复用”：AppLayout 里的 <Outlet/>
  *   会渲染当前匹配到的子页面。
  */
-import { NavLink, Outlet, Route, Routes } from 'react-router-dom'
+import { Navigate, NavLink, Outlet, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { RequireAuth } from './auth/RequireAuth'
 import { KnowledgePage } from './pages/KnowledgePage'
@@ -73,8 +74,10 @@ export function App() {
   return (
     <AuthProvider>
       <Routes>
-        {/* 公开路由：登录页 */}
+        {/* 公开路由：登录页（登录/注册 Tab 二合一） */}
         <Route path="/login" element={<LoginPage />} />
+        {/* 旧注册页地址重定向到登录页的注册 Tab，收藏过 /register 的链接不失效 */}
+        <Route path="/register" element={<Navigate to="/login?tab=register" replace />} />
 
         {/* 受保护路由：整组套登录守卫与统一布局 */}
         <Route

@@ -15,7 +15,6 @@ export function KnowledgePage() {
   const [chunks, setChunks] = useState<Chunk[] | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [name, setName] = useState('')
   // 文档列表是否正在加载（首次进入或手动刷新时为 true）：控制刷新图标旋转并防止重复点击
   const [refreshing, setRefreshing] = useState(false)
   const refreshBases = async () => {
@@ -58,17 +57,6 @@ export function KnowledgePage() {
       setBusy(false)
     }
   }
-  const create = async () => {
-    if (!name.trim()) return
-    try {
-      const base = await api.createBase(name.trim())
-      setBases([...bases, base])
-      setBaseId(base.id)
-      setName('')
-    } catch (error) {
-      setError((error as Error).message)
-    }
-  }
   return (
     <>
       <header className="page-header">
@@ -79,29 +67,11 @@ export function KnowledgePage() {
         </div>
         <span className="pill">知识库 / 管理</span>
       </header>
-      {/* <div className="toolbar">
-        <select
-          aria-label="选择知识库"
-          value={baseId}
-          onChange={event => setBaseId(event.target.value)}
-        >
-          <option value="">请选择知识库</option>
-          {bases.map(base => (
-            <option key={base.id} value={base.id}>
-              {base.name}
-            </option>
-          ))}
-        </select>
-        <div className="inline">
-          <input
-            aria-label="新知识库名称"
-            placeholder="新知识库名称"
-            value={name}
-            onChange={event => setName(event.target.value)}
-          />
-          <button onClick={() => void create()}>创建知识库</button>
-        </div>
-      </div> */}
+      {/*
+       * 工具栏已移除：注册时后端会自动为每个用户创建“默认知识库”，
+       * 页面加载后 refreshBases 自动选中第一个（也是唯一一个）知识库，
+       * 上传区直接可用。原“选择知识库下拉 + 手动创建”属于多余交互。
+       */}
       {error && <div className="alert">{error}</div>}
       <div className="stats-grid">
         <div className="stat">

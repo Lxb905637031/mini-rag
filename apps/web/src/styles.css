@@ -166,20 +166,7 @@ a {
   font-size: 11px;
   color: #748675;
 }
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  gap: 15px;
-  margin-bottom: 24px;
-  align-items: center;
-}
-.toolbar select {
-  min-width: 190px;
-}
-.inline {
-  display: flex;
-  gap: 8px;
-}
+/* 说明：原 .toolbar / .inline（知识库选择与创建工具栏）样式已随功能移除一并删除。 */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -861,6 +848,72 @@ td {
 }
 .login-field input {
   width: 100%;
+}
+
+/* 密码输入框容器：相对定位，给绝对定位的眼睛按钮当锚点。 */
+.input-wrap {
+  position: relative;
+}
+
+/* 带眼睛按钮的输入框：右侧留出空间，避免输入的长文字被按钮盖住。 */
+.input-wrap input {
+  padding-right: 40px;
+}
+
+/*
+ * 眼睛切换按钮：叠在输入框右侧垂直居中。
+ * 必须显式覆盖全局 button 样式的绿底白字（否则会变成一颗绿色小方块）。
+ */
+.password-toggle {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+}
+
+/* 悬停反馈：图标变绿 + 极淡的绿底，提示“这里可以点”。 */
+.password-toggle:hover {
+  color: var(--green);
+  background: rgba(35, 94, 75, 0.08);
+}
+
+/* 登录/注册 Tab 切换条：两枚并排页签放在浅灰底凹槽里。 */
+.login-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 24px;
+  padding: 4px;
+  background: #f0f2ef;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/*
+ * 单个页签：必须显式覆盖全局 button 样式的绿底白字，
+ * 否则会和提交按钮长成一个样。默认态是灰字透明底。
+ */
+.login-tab {
+  flex: 1; /* 两枚页签平分整行宽度 */
+  padding: 9px 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 选中的页签：白底绿字 + 轻微阴影，形成“凸起”的当前页签效果。 */
+.login-tab.active {
+  background: #fff;
+  color: var(--green);
+  box-shadow: 0 2px 8px rgba(35, 94, 75, 0.12);
 }
 
 /* 登录按钮：撑满卡片宽度。 */

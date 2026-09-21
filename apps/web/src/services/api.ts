@@ -149,6 +149,16 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 /** 页面调用的全部接口集合（按业务分组）。 */
 export const api = {
   // —— 认证相关 ——
+  /** 注册：创建新账号，后端直接返回令牌（注册即登录）。返回结构与 login 完全一致。 */
+  register: (username: string, password: string, displayName?: string) =>
+    request<LoginResponse>('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // displayName 为 undefined 时 JSON.stringify 会自动丢掉这个键（后端视为未填）。
+      body: JSON.stringify({ username, password, displayName }),
+      // 注册接口本身是公开的，401（理论上不会出现）也不应触发全局跳转。
+      skipUnauthorizedHandler: true,
+    }),
   /** 登录：用户名密码换令牌。401 不触发全局跳转，只把“用户名或密码错误”抛给登录页。 */
   login: (username: string, password: string) =>
     request<LoginResponse>('/auth/login', {
@@ -163,13 +173,9 @@ export const api = {
   logout: () => request<{ success: boolean }>('/auth/logout', { method: 'POST' }),
 
   // —— 知识库 ——
+  // 说明：创建知识库的 createBase 已删除——注册时后端自动为用户建“默认知识库”，
+  // 前端不再需要手动创建入口；后端 POST /knowledge-bases 接口本身仍然保留。
   bases: () => request<KnowledgeBase[]>('/knowledge-bases'),
-  createBase: (name: string) =>
-    request<KnowledgeBase>('/knowledge-bases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    }),
   documents: (id: string) => request<DocumentRecord[]>(`/knowledge-bases/${id}/documents`),
   upload: (id: string, file: File) => {
     const data = new FormData()
