@@ -1,15 +1,51 @@
 services:
+  # PostgreSQL：关系型数据库，2026-09-20 起替代 SQLite 存放业务数据
+  # （用户/知识库/文档/切片）。改用 PG 的原因：标准 SQL、可用 pgAdmin 等
+  # 图形客户端连接查询、与生产环境常用数据库一致。
+  postgres:
+    image: postgres:17-alpine
+    # 环境变量是 postgres 官方镜像的初始化约定：
+    #   POSTGRES_USER/POSTGRES_PASSWORD 创建超级用户；POSTGRES_DB 自动建库。
+    # 本地开发用简单账号密码；生产环境务必改强密码并走 secrets。
+    environment:
+      POSTGRES_USER: mini_rag
+      POSTGRES_PASSWORD: mini_rag
+      POSTGRES_DB: mini_rag
+    ports:
+      - '5432:5432'
+    # 数据持久化：PG 数据目录挂到命名卷，容器重建数据不丢。
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready 是 PG 自带的就绪探测命令，能连上即返回 0。
+      test: ['CMD-SHELL', 'pg_isready -U mini_rag -d mini_rag']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   chroma:
     image: chromadb/chroma:0.5.23
     ports:
       - '8000:8000'
+    # 数据卷说明：用 bind mount（挂载项目内真实目录）而不是 Docker 命名卷。
+    # ./data/chroma-local 是之前"本地 Python 版 Chroma"的数据目录（版本同为 0.5.23），
+    # 挂进容器后里面的向量数据无缝继续使用；数据肉眼可见，也随项目目录一起备份。
     volumes:
-      - chroma_data:/chroma/chroma
+      - ./data/chroma-local:/chroma/chroma
     environment:
       IS_PERSISTENT: 'TRUE'
       ANONYMIZED_TELEMETRY: 'FALSE'
+    # 健康检查：访问 Chroma 自带的 heartbeat 接口，能返回即视为存活。
+    # 注意不能用 wget/curl——chroma 镜像里没有这两个命令（之前因此误报 unhealthy）；
+    # 镜像基于 Python，用标准库 urllib 发请求最稳妥。
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:8000/api/v2/heartbeat']
+      test:
+        [
+          'CMD',
+          'python3',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v2/heartbeat')",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -35,6 +71,9 @@ services:
       retries: 5
 
 volumes:
-  chroma_data:
+  # 说明：chroma 已改为 bind mount（上面的 ./data/chroma-local），不使用命名卷；
+  # 历史遗留的旧命名卷（含切换前的向量）已于 2026-09-20 确认无用并删除。
+  # PostgreSQL 数据持久化卷：表结构、用户与文档数据都在这里。
+  pg_data:
   # Redis 数据持久化卷：AOF 文件写在容器内 /data 目录，挂载到该卷。
   redis_data:

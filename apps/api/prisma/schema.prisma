@@ -3,7 +3,10 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  // 2026-09-20 起：SQLite（文件库 dev.db）切换为 PostgreSQL（Docker 容器）。
+  // 原因：标准 SQL、可用 pgAdmin/DBeaver 等图形客户端查询、贴近生产环境。
+  // 模型定义本身不需要改——Prisma 屏蔽了数据库差异，仅换 provider 与连接串。
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
