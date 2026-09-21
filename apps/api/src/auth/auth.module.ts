@@ -22,9 +22,9 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET ?? 'mini-rag-dev-only-secret',
-      // 形如 '7d' 的有效期字符串符合 jsonwebtoken 的写法（ms 库时间格式）；
-      // 这里的类型断言仅用于适配其精确字符串字面量类型，运行时仍是普通字符串。
-      signOptions: { expiresIn: (process.env.JWT_EXPIRES_IN ?? '7d') as any },
+      // 形如 '1d' 的有效期字符串符合 jsonwebtoken 的写法（ms 库时间格式）；
+      // 当前 .env 里配置为 1d（一天）；这里没配到环境变量时兜底 1h，避免误用超长有效期。
+      signOptions: { expiresIn: (process.env.JWT_EXPIRES_IN ?? '1h') as any },
     }),
   ],
   controllers: [AuthController],
