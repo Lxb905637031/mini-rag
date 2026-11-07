@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { api, type ChatResult, type KnowledgeBase, type SearchResult } from '../services/api'
+import {
+  api,
+  streamChatQuery,
+  type ChatResult,
+  type KnowledgeBase,
+  type SearchResult,
+} from '../services/api'
 
 export function ChatPage() {
   const [bases, setBases] = useState<KnowledgeBase[]>([])
@@ -8,6 +14,11 @@ export function ChatPage() {
   const [mode, setMode] = useState('hybrid')
   const [rerank, setRerank] = useState(false)
   const [result, setResult] = useState<ChatResult | null>(null)
+  // 流式过程中的部分结果：trace 先到（渲染右侧来源），answer 随 delta 增长（打字机效果）。
+  const [partial, setPartial] = useState<{
+    answer: string
+    trace: ChatResult['trace'] | null
+  } | null>(null)
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -26,8 +37,19 @@ export function ChatPage() {
     setError('')
     setQuestion(query)
     setResult(null)
+    setPartial(null)
     try {
-      setResult(await api.query({ knowledgeBaseId: baseId, query, mode, topK: 4, rerank }))
+      const finalResult = await streamChatQuery(
+        { knowledgeBaseId: baseId, query, mode, topK: 4, rerank },
+        {
+          // 检索完成：右侧“检索依据”面板立刻可用，答案稍后流式到达。
+          onTrace: trace => setPartial({ answer: '', trace }),
+          onDelta: (_delta, answerSoFar) =>
+            setPartial(prev => ({ answer: answerSoFar, trace: prev?.trace ?? null })),
+        },
+      )
+      setResult(finalResult)
+      setPartial(null)
       setQuery('')
     } catch (error) {
       setError((error as Error).message)
@@ -35,6 +57,9 @@ export function ChatPage() {
       setBusy(false)
     }
   }
+  // 展示中的答案：优先最终结果；流式期间用部分结果（answer 已有内容时渲染打字机）。
+  const displayAnswer = result?.answer ?? (partial?.answer || '')
+  const activeTrace = result?.trace ?? partial?.trace ?? null
   return (
     <>
       <header className="page-header">
@@ -101,18 +126,25 @@ export function ChatPage() {
               </div>
             )}
             {question && <div className="message user-message">{question}</div>}
-            {busy && (
+            {busy && !displayAnswer && (
               <div className="message assistant-message">
                 <span className="status-dot" /> 正在检索与生成…
               </div>
             )}
-            {result && (
+            {displayAnswer && (
               <div className="message assistant-message">
                 <div className="answer-label">✦ MINI RAG</div>
-                <p>{result.answer}</p>
-                <small>
-                  检索 {result.trace.durationMs} ms · {result.trace.reranked.length} 个来源
-                </small>
+                <p>
+                  {displayAnswer}
+                  {busy && <span className="status-dot" aria-label="生成中" />}
+                </p>
+                {activeTrace && (
+                  <small>
+                    {busy
+                      ? `生成中 · 检索 ${activeTrace.durationMs} ms · ${activeTrace.reranked.length} 个来源`
+                      : `检索 ${activeTrace.durationMs} ms · ${activeTrace.reranked.length} 个来源`}
+                  </small>
+                )}
               </div>
             )}
           </div>
@@ -144,22 +176,22 @@ export function ChatPage() {
         <aside className="sources-panel">
           <div className="panel-heading">
             <h2>检索依据</h2>
-            <span>{result?.trace.reranked.length ?? 0} 个片段</span>
+            <span>{activeTrace?.reranked.length ?? 0} 个片段</span>
           </div>
-          {result ? (
-            result.trace.reranked.map((item, index) => (
+          {activeTrace ? (
+            activeTrace.reranked.map((item, index) => (
               <Source key={item.id} item={item} index={index} />
             ))
           ) : (
             <div className="empty">提问后在这里查看来源与排序。</div>
           )}
-          {result && (
+          {activeTrace && (
             <details className="trace">
               <summary>查看检索过程</summary>
               {(['vector', 'bm25', 'fused'] as const).map(type => (
                 <div key={type}>
                   <strong>{type === 'fused' ? 'RRF 融合' : type}</strong>
-                  {result.trace[type].map((item, index) => (
+                  {activeTrace[type].map((item, index) => (
                     <small key={item.id}>
                       #{index + 1} {String(item.metadata.fileName)} · {item.score.toFixed(4)}
                     </small>

@@ -121,6 +121,105 @@ interface RequestOptions extends RequestInit {
 }
 
 /**
+ * 流式问答的回调集合：检索完成 / 答案增量各回调一次。
+ * streamChatQuery 内部维护完整答案，onDelta 第二个参数直接给出“到目前为止的完整文本”。
+ */
+interface StreamHandlers {
+  onTrace?: (trace: ChatResult['trace']) => void
+  onDelta?: (delta: string, answerSoFar: string) => void
+}
+
+/**
+ * 流式问答（SSE）：POST /chat/query/stream。
+ *
+ * 为什么不用 EventSource：它只支持 GET 且无法携带 Authorization 头，
+ * 所以这里用 fetch + ReadableStream 手动解析 `data: {...}\n\n` 帧。
+ *
+ * 错误处理与 request() 保持一致：HTTP 非 2xx 先解析统一信封再抛错；
+ * 401 触发全局跳转。生成中途的失败以 {"type":"error"} 事件下发，同样抛 Error。
+ */
+export async function streamChatQuery(
+  body: {
+    knowledgeBaseId: string
+    query: string
+    mode: string
+    topK: number
+    rerank: boolean
+  },
+  handlers: StreamHandlers = {},
+): Promise<ChatResult> {
+  const headers = new Headers({ 'Content-Type': 'application/json' })
+  if (tokenStore.token) headers.set('Authorization', `Bearer ${tokenStore.token}`)
+
+  const response = await fetch(`${baseUrl}/chat/query/stream`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  })
+
+  // 流还没开始：非 2xx 走统一信封错误（鉴权/参数/知识库归属等问题都在这里拦截）。
+  if (!response.ok || !response.body) {
+    let envelope: ApiEnvelope<unknown> | null = null
+    try {
+      envelope = (await response.json()) as ApiEnvelope<unknown>
+    } catch {
+      envelope = null
+    }
+    if (response.status === 401 && unauthorizedHandler) unauthorizedHandler()
+    throw new Error(
+      `${envelope?.code ?? 'REQUEST_FAILED'}: ${envelope?.error?.details ?? envelope?.message ?? '请求失败'}`,
+    )
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  // 用对象包装：闭包内赋值不会触发 TS 的控制流窄化，返回时不需要类型断言。
+  const state: { answer: string; trace: ChatResult['trace'] | null } = {
+    answer: '',
+    trace: null,
+  }
+
+  // 逐帧解析：一条 SSE 消息以空行（\n\n）结束；我们只关心 data: 行。
+  const consume = (frame: string) => {
+    const dataLine = frame.split('\n').find(line => line.startsWith('data:'))
+    if (!dataLine) return
+    const payload = JSON.parse(dataLine.slice(5)) as {
+      type: 'trace' | 'delta' | 'done' | 'error'
+      content?: string
+      answer?: string
+      message?: string
+      trace?: ChatResult['trace']
+    }
+    if (payload.type === 'trace' && payload.trace) {
+      state.trace = payload.trace
+      handlers.onTrace?.(payload.trace)
+    } else if (payload.type === 'delta' && payload.content) {
+      state.answer += payload.content
+      handlers.onDelta?.(payload.content, state.answer)
+    } else if (payload.type === 'done') {
+      if (payload.answer) state.answer = payload.answer
+      if (payload.trace) state.trace = payload.trace
+    } else if (payload.type === 'error') {
+      throw new Error(payload.message ?? '答案生成失败，请稍后重试')
+    }
+  }
+
+  // 读取直到后端关闭流；按空行切帧，半截帧留在 buffer 里等下一批字节。
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) consume(frame)
+  }
+  if (buffer.trim()) consume(buffer)
+
+  return { answer: state.answer, trace: state.trace as ChatResult['trace'] }
+}
+
+/**
  * 统一请求函数：所有 api 方法都经它发出。
  * @param path 以 / 开头的接口路径（如 /auth/login）
  * @param options 原生 fetch 配置 + skipUnauthorizedHandler 开关
