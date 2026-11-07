@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# .env 含密钥与数据库口令，只提交 .env.example
+.env

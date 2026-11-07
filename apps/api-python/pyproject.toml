@@ -1,0 +1,42 @@
+[project]
+name = "mini-rag-api"
+version = "0.1.0"
+description = "mini-rag 后端 Python 平替：FastAPI 1:1 复刻 NestJS 版全部 16 个接口"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.2",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
+    "redis>=5.0",
+    "rq>=1.16",
+    "bcrypt>=4.1",
+    "pyjwt>=2.8",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+    "jieba>=0.42",
+    "pypdf>=4.2",
+    "python-docx>=1.1",
+    "langchain-text-splitters>=0.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+mini-rag-worker = "app.workers.__main__:main"
+mini-rag-seed = "app.db.seed:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
